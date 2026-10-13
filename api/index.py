@@ -36,6 +36,7 @@ def load_db():
                         "version": v_name,
                         "download_url": fields.get("download_url", {}).get("stringValue", ""),
                         "changelog": fields.get("changelog", {}).get("stringValue", ""),
+                        "icon_url": fields.get("icon_url", {}).get("stringValue", ""),
                         "enabled": fields.get("enabled", {}).get("booleanValue", True),
                         "timestamp": fields.get("timestamp", {}).get("doubleValue", 0.0)
                     }
@@ -56,6 +57,7 @@ def save_version(v_data):
                 "version": {"stringValue": str(v_data["version"])},
                 "download_url": {"stringValue": str(v_data["download_url"])},
                 "changelog": {"stringValue": str(v_data["changelog"])},
+                "icon_url": {"stringValue": str(v_data.get("icon_url", ""))},
                 "enabled": {"booleanValue": bool(v_data["enabled"])},
                 "timestamp": {"doubleValue": float(v_data["timestamp"])}
             }
@@ -83,6 +85,7 @@ def check_update():
         "latest_version": latest["version"],
         "download_url": latest["download_url"],
         "changelog": latest["changelog"],
+        "icon_url": latest.get("icon_url", ""),
         "mandatory": False
     }
 
@@ -132,10 +135,11 @@ def admin_dashboard(key: str = ""):
         
         # Base64 encode the changelog so it doesn't break JS quotes/newlines
         b64_changelog = base64.b64encode(v['changelog'].encode('utf-8')).decode('utf-8')
+        icon_url = v.get('icon_url', '')
         
         rows += f"""
         <tr>
-            <td>{v['version']}</td>
+            <td>{v.get('icon_url', '')} {v['version']}</td>
             <td><a href="{v['download_url']}" target="_blank">Link</a></td>
             <td><pre style="margin:0; font-family:inherit;">{v['changelog']}</pre></td>
             <td>{status}</td>
@@ -145,7 +149,7 @@ def admin_dashboard(key: str = ""):
                     <input type="hidden" name="version" value="{v['version']}">
                     <button type="submit">{btn_text}</button>
                 </form>
-                <button type="button" style="background:#ff6688;" onclick="editVersion('{v['version']}', '{v['download_url']}', '{b64_changelog}')">Edit</button>
+                <button type="button" style="background:#ff6688;" onclick="editVersion('{v['version']}', '{v['download_url']}', '{b64_changelog}', '{icon_url}')">Edit</button>
             </td>
         </tr>
         """
@@ -167,11 +171,12 @@ def admin_dashboard(key: str = ""):
             .form-box {{ border: 1px dashed #ff6688; padding: 20px; max-width: 600px; margin-bottom: 30px; position: relative; }}
         </style>
         <script>
-            function editVersion(version, url, b64_changelog) {{
+            function editVersion(version, url, b64_changelog, icon_url) {{
                 document.getElementById('form-title').innerText = 'Edit Release: ' + version;
                 document.getElementById('version-input').value = version;
                 document.getElementById('version-input').readOnly = true; 
                 document.getElementById('url-input').value = url;
+                document.getElementById('icon-input').value = icon_url || '';
                 document.getElementById('changelog-input').value = decodeURIComponent(escape(window.atob(b64_changelog)));
                 document.getElementById('submit-btn').innerText = 'Save Changes';
                 document.getElementById('cancel-btn').style.display = 'inline-block';
@@ -182,6 +187,7 @@ def admin_dashboard(key: str = ""):
                 document.getElementById('version-input').value = '';
                 document.getElementById('version-input').readOnly = false;
                 document.getElementById('url-input').value = '';
+                document.getElementById('icon-input').value = '';
                 document.getElementById('changelog-input').value = '';
                 document.getElementById('submit-btn').innerText = 'Publish Update';
                 document.getElementById('cancel-btn').style.display = 'none';
@@ -200,6 +206,9 @@ def admin_dashboard(key: str = ""):
                 
                 <label>Download URL (Google Drive / MediaFire etc):</label>
                 <input type="url" id="url-input" name="download_url" required>
+
+                <label>Update Icon URL / Emoji (Optional):</label>
+                <input type="text" id="icon-input" name="icon_url" placeholder="e.g. 🚀 or https://image-link.com/icon.png">
                 
                 <label>Changelog (What's new?):</label>
                 <textarea id="changelog-input" name="changelog" rows="4" required></textarea>
@@ -220,7 +229,7 @@ def admin_dashboard(key: str = ""):
     return HTMLResponse(content=html)
 
 @app.post("/admin/add")
-def add_version(key: str = Form(...), version: str = Form(...), download_url: str = Form(...), changelog: str = Form(...)):
+def add_version(key: str = Form(...), version: str = Form(...), download_url: str = Form(...), icon_url: str = Form(""), changelog: str = Form(...)):
     if key != ADMIN_KEY:
         return "Unauthorized"
         
@@ -230,6 +239,7 @@ def add_version(key: str = Form(...), version: str = Form(...), download_url: st
         # Update existing version (preserves 'enabled' status and 'timestamp')
         v_data = data["versions"][version]
         v_data["download_url"] = download_url
+        v_data["icon_url"] = icon_url
         v_data["changelog"] = changelog
     else:
         # Calculate next doc_id (e.g. updates_1, updates_2)
@@ -250,6 +260,7 @@ def add_version(key: str = Form(...), version: str = Form(...), download_url: st
             "doc_id": next_doc_id,
             "version": version,
             "download_url": download_url,
+            "icon_url": icon_url,
             "changelog": changelog,
             "enabled": True,
             "timestamp": datetime.now().timestamp()
