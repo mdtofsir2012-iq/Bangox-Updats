@@ -89,6 +89,13 @@ def check_update():
         "mandatory": False
     }
 
+@app.get("/api/updates/all")
+def get_all_updates():
+    """সব আপডেট (ইনেবল ও ডিসেবল দুটোই) রিটার্ন করবে (Active গুলো উপরে, Disabled গুলো নিচে)"""
+    data = load_db()
+    versions = sorted(data["versions"].values(), key=lambda x: (x["enabled"], x["timestamp"]), reverse=True)
+    return {"versions": versions}
+
 @app.get("/")
 def home():
     html_content = f"""
@@ -133,9 +140,10 @@ def admin_dashboard(key: str = ""):
         status = "<span style='color:#49ff00;'>Active</span>" if v["enabled"] else "<span style='color:red;'>Disabled</span>"
         btn_text = "Disable" if v["enabled"] else "Enable"
         
-        # Base64 encode the changelog so it doesn't break JS quotes/newlines
+        b64_ver = base64.b64encode(v['version'].encode('utf-8')).decode('utf-8')
+        b64_url = base64.b64encode(v['download_url'].encode('utf-8')).decode('utf-8')
+        b64_icon = base64.b64encode(v.get('icon_url', '').encode('utf-8')).decode('utf-8')
         b64_changelog = base64.b64encode(v['changelog'].encode('utf-8')).decode('utf-8')
-        icon_url = v.get('icon_url', '')
         
         rows += f"""
         <tr>
@@ -149,7 +157,7 @@ def admin_dashboard(key: str = ""):
                     <input type="hidden" name="version" value="{v['version']}">
                     <button type="submit">{btn_text}</button>
                 </form>
-                <button type="button" style="background:#ff6688;" onclick="editVersion('{v['version']}', '{v['download_url']}', '{b64_changelog}', '{icon_url}')">Edit</button>
+                <button type="button" style="background:#ff6688;" onclick="editVersion('{b64_ver}', '{b64_url}', '{b64_icon}', '{b64_changelog}')">Edit</button>
             </td>
         </tr>
         """
@@ -171,13 +179,18 @@ def admin_dashboard(key: str = ""):
             .form-box {{ border: 1px dashed #ff6688; padding: 20px; max-width: 600px; margin-bottom: 30px; position: relative; }}
         </style>
         <script>
-            function editVersion(version, url, b64_changelog, icon_url) {{
+            function editVersion(b64_ver, b64_url, b64_icon, b64_changelog) {{
+                let version = decodeURIComponent(escape(window.atob(b64_ver)));
+                let url = decodeURIComponent(escape(window.atob(b64_url)));
+                let icon = decodeURIComponent(escape(window.atob(b64_icon)));
+                let changelog = decodeURIComponent(escape(window.atob(b64_changelog)));
+
                 document.getElementById('form-title').innerText = 'Edit Release: ' + version;
                 document.getElementById('version-input').value = version;
                 document.getElementById('version-input').readOnly = true; 
                 document.getElementById('url-input').value = url;
-                document.getElementById('icon-input').value = icon_url || '';
-                document.getElementById('changelog-input').value = decodeURIComponent(escape(window.atob(b64_changelog)));
+                document.getElementById('icon-input').value = icon;
+                document.getElementById('changelog-input').value = changelog;
                 document.getElementById('submit-btn').innerText = 'Save Changes';
                 document.getElementById('cancel-btn').style.display = 'inline-block';
                 window.scrollTo(0, 0);
