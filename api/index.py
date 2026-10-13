@@ -55,19 +55,22 @@ def check_update():
 
 @app.get("/")
 def home():
-    html_content = """
+    html_content = f"""
     <!DOCTYPE html>
     <html>
     <head><title>BANGOX Update Server</title>
     <style>
-        body { background-color: #000c12; color: #49ff00; font-family: 'Courier New'; text-align: center; padding-top: 50px; }
-        .container { border: 1px solid #49ff00; display: inline-block; padding: 40px; border-radius: 8px; background-color: #001218; }
-        a { color: #ff6688; text-decoration: none; }
+        body {{ background-color: #000c12; color: #49ff00; font-family: 'Courier New'; text-align: center; padding-top: 50px; }}
+        .container {{ border: 1px solid #49ff00; display: inline-block; padding: 40px; border-radius: 8px; background-color: #001218; }}
+        a {{ color: #ff6688; text-decoration: none; padding: 10px; border: 1px solid #ff6688; border-radius: 4px; display: inline-block; margin-top: 20px; }}
+        a:hover {{ background-color: #ff6688; color: #000; }}
     </style></head>
     <body>
         <div class="container">
             <h1>BANGOX API SERVER</h1>
             <p>System is ONLINE.</p>
+            <br>
+            <a href="/admin?key={ADMIN_KEY}">Go to Admin Dashboard</a>
         </div>
     </body>
     </html>
