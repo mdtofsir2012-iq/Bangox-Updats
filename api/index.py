@@ -4,33 +4,66 @@ from datetime import datetime
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="BANGOX Update Server")
+import requests
 
-# ডাটাবেস ফাইল (যেখানে সব ভার্সনের তথ্য সেভ থাকবে)
-DB_FILE = os.path.join(os.path.dirname(__file__), "versions.json")
+app = FastAPI(title="BANGOX Update Server")
 
 # এডমিন প্যানেলে ঢোকার জন্য সিক্রেট পাসওয়ার্ড
 ADMIN_KEY = "bangox123"
 
+# Firebase Config (REST API)
+PROJECT_ID = "bangox-updates"
+API_KEY = "AIzaSyCfNNRZmN7I4zcq_8964SQ5ptAAcJOdGZ8"
+FIRESTORE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/Updates"
+
 def load_db():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {
-        "versions": {
-            "13.10.2026": {
-                "version": "13.10.2026",
-                "download_url": "https://your-cloud-storage-link.com/bangox-latest.exe",
-                "changelog": "- Added new UI customization\n- Added dynamic SVG icons",
-                "enabled": True,
-                "timestamp": datetime.now().timestamp()
+    try:
+        url = f"{FIRESTORE_URL}?key={API_KEY}"
+        resp = requests.get(url)
+        data = resp.json()
+        
+        versions = {}
+        if "documents" in data:
+            for doc in data["documents"]:
+                doc_path = doc.get("name", "")
+                doc_id = doc_path.split("/")[-1] # example: updates_1
+                
+                fields = doc.get("fields", {})
+                v_name = fields.get("version", {}).get("stringValue", "")
+                if v_name:
+                    versions[v_name] = {
+                        "doc_id": doc_id,
+                        "version": v_name,
+                        "download_url": fields.get("download_url", {}).get("stringValue", ""),
+                        "changelog": fields.get("changelog", {}).get("stringValue", ""),
+                        "enabled": fields.get("enabled", {}).get("booleanValue", True),
+                        "timestamp": fields.get("timestamp", {}).get("doubleValue", 0.0)
+                    }
+        return {"versions": versions}
+    except Exception as e:
+        print("Error loading from Firestore:", e)
+        return {"versions": {}}
+
+def save_version(v_data):
+    try:
+        doc_id = v_data.get("doc_id")
+        if not doc_id:
+            return
+            
+        url = f"{FIRESTORE_URL}/{doc_id}?key={API_KEY}"
+        payload = {
+            "fields": {
+                "version": {"stringValue": str(v_data["version"])},
+                "download_url": {"stringValue": str(v_data["download_url"])},
+                "changelog": {"stringValue": str(v_data["changelog"])},
+                "enabled": {"booleanValue": bool(v_data["enabled"])},
+                "timestamp": {"doubleValue": float(v_data["timestamp"])}
             }
         }
-    }
-
-def save_db(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+        # PATCH creates or updates the document
+        requests.patch(url, json=payload)
+    except Exception as e:
+        print("Error saving to Firestore:", e)
 
 @app.get("/api/update")
 def check_update():
@@ -91,10 +124,15 @@ def admin_dashboard(key: str = ""):
     data = load_db()
     versions = sorted(data["versions"].values(), key=lambda x: x["timestamp"], reverse=True)
     
+    import base64
     rows = ""
     for v in versions:
         status = "<span style='color:#49ff00;'>Active</span>" if v["enabled"] else "<span style='color:red;'>Disabled</span>"
         btn_text = "Disable" if v["enabled"] else "Enable"
+        
+        # Base64 encode the changelog so it doesn't break JS quotes/newlines
+        b64_changelog = base64.b64encode(v['changelog'].encode('utf-8')).decode('utf-8')
+        
         rows += f"""
         <tr>
             <td>{v['version']}</td>
@@ -107,6 +145,7 @@ def admin_dashboard(key: str = ""):
                     <input type="hidden" name="version" value="{v['version']}">
                     <button type="submit">{btn_text}</button>
                 </form>
+                <button type="button" style="background:#ff6688;" onclick="editVersion('{v['version']}', '{v['download_url']}', '{b64_changelog}')">Edit</button>
             </td>
         </tr>
         """
@@ -122,29 +161,51 @@ def admin_dashboard(key: str = ""):
             table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
             th, td {{ border: 1px solid #49ff00; padding: 10px; text-align: left; }}
             th {{ background-color: #001218; }}
-            input, textarea, button {{ width: 100%; background: #001218; color: #fff; border: 1px solid #49ff00; padding: 8px; margin-bottom: 10px; font-family: 'Courier New'; }}
-            button {{ background: #49ff00; color: #000; font-weight: bold; cursor: pointer; }}
+            input, textarea, button {{ width: 100%; background: #001218; color: #fff; border: 1px solid #49ff00; padding: 8px; margin-bottom: 10px; font-family: 'Courier New'; box-sizing: border-box; }}
+            button {{ background: #49ff00; color: #000; font-weight: bold; cursor: pointer; width: auto; padding: 8px 15px; margin-right: 5px; }}
             button:hover {{ background: #fff; }}
-            .form-box {{ border: 1px dashed #ff6688; padding: 20px; max-width: 600px; margin-bottom: 30px; }}
+            .form-box {{ border: 1px dashed #ff6688; padding: 20px; max-width: 600px; margin-bottom: 30px; position: relative; }}
         </style>
+        <script>
+            function editVersion(version, url, b64_changelog) {{
+                document.getElementById('form-title').innerText = 'Edit Release: ' + version;
+                document.getElementById('version-input').value = version;
+                document.getElementById('version-input').readOnly = true; 
+                document.getElementById('url-input').value = url;
+                document.getElementById('changelog-input').value = decodeURIComponent(escape(window.atob(b64_changelog)));
+                document.getElementById('submit-btn').innerText = 'Save Changes';
+                document.getElementById('cancel-btn').style.display = 'inline-block';
+                window.scrollTo(0, 0);
+            }}
+            function resetForm() {{
+                document.getElementById('form-title').innerText = 'Add New Release';
+                document.getElementById('version-input').value = '';
+                document.getElementById('version-input').readOnly = false;
+                document.getElementById('url-input').value = '';
+                document.getElementById('changelog-input').value = '';
+                document.getElementById('submit-btn').innerText = 'Publish Update';
+                document.getElementById('cancel-btn').style.display = 'none';
+            }}
+        </script>
     </head>
     <body>
         <h1>BANGOX Update Admin Panel</h1>
         
         <div class="form-box">
-            <h2>Add New Release</h2>
+            <h2 id="form-title">Add New Release</h2>
             <form action="/admin/add" method="post">
                 <input type="hidden" name="key" value="{ADMIN_KEY}">
                 <label>Version Name (e.g. 14.0.2026):</label>
-                <input type="text" name="version" required>
+                <input type="text" id="version-input" name="version" required>
                 
                 <label>Download URL (Google Drive / MediaFire etc):</label>
-                <input type="url" name="download_url" required>
+                <input type="url" id="url-input" name="download_url" required>
                 
                 <label>Changelog (What's new?):</label>
-                <textarea name="changelog" rows="4" required></textarea>
+                <textarea id="changelog-input" name="changelog" rows="4" required></textarea>
                 
-                <button type="submit">Publish Update</button>
+                <button type="submit" id="submit-btn">Publish Update</button>
+                <button type="button" id="cancel-btn" style="display:none; background:#ff6688;" onclick="resetForm()">Cancel</button>
             </form>
         </div>
 
@@ -164,14 +225,37 @@ def add_version(key: str = Form(...), version: str = Form(...), download_url: st
         return "Unauthorized"
         
     data = load_db()
-    data["versions"][version] = {
-        "version": version,
-        "download_url": download_url,
-        "changelog": changelog,
-        "enabled": True,
-        "timestamp": datetime.now().timestamp()
-    }
-    save_db(data)
+    
+    if version in data["versions"]:
+        # Update existing version (preserves 'enabled' status and 'timestamp')
+        v_data = data["versions"][version]
+        v_data["download_url"] = download_url
+        v_data["changelog"] = changelog
+    else:
+        # Calculate next doc_id (e.g. updates_1, updates_2)
+        existing_ids = [v.get("doc_id", "") for v in data["versions"].values()]
+        max_id = 0
+        for eid in existing_ids:
+            if eid.startswith("updates_"):
+                try:
+                    num = int(eid.split("_")[1])
+                    if num > max_id:
+                        max_id = num
+                except:
+                    pass
+        next_doc_id = f"updates_{max_id + 1}"
+        
+        # Add new version
+        v_data = {
+            "doc_id": next_doc_id,
+            "version": version,
+            "download_url": download_url,
+            "changelog": changelog,
+            "enabled": True,
+            "timestamp": datetime.now().timestamp()
+        }
+        
+    save_version(v_data)
     return RedirectResponse(url=f"/admin?key={ADMIN_KEY}", status_code=303)
 
 @app.post("/admin/toggle")
@@ -181,7 +265,8 @@ def toggle_version(key: str = Form(...), version: str = Form(...)):
         
     data = load_db()
     if version in data["versions"]:
-        data["versions"][version]["enabled"] = not data["versions"][version]["enabled"]
-        save_db(data)
+        v_data = data["versions"][version]
+        v_data["enabled"] = not v_data["enabled"]
+        save_version(v_data)
         
     return RedirectResponse(url=f"/admin?key={ADMIN_KEY}", status_code=303)
